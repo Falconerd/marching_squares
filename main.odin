@@ -10,7 +10,7 @@
 
 	D -- C values must be ordered bottom left -> bottom right -> top right -> top left
 	|    | this is consistent with graphics APIs that require counter-clockwise winding
-	A -- B
+	A -- B (will be useful when transitioning to marching cubes)
 
 	Example:
 	0---0 only the bottom right corner is above the threshold
