@@ -29,6 +29,7 @@
 package main
 
 import "core:fmt"
+import "core:math/noise"
 import "core:math/rand"
 import rl "vendor:raylib"
 
@@ -130,53 +131,117 @@ pos_from_index :: proc(index, width: int) -> [2]f32 {
 	return [2]f32{x, y}
 }
 
-main :: proc() {
-	rl.InitWindow(1080, 720, "Marching Squares")
-	rl.SetTargetFPS(60)
-	lines := make([dynamic][2][2]f32)
-
-	scalar_field := ScalarField {
-		values = []u8{0, 0, 0, 0, 0, 15, 15, 0, 0, 15, 15, 0, 0, 0, 0, 0},
-		size   = [2]int{4, 4},
-		scale  = 20,
-	}
-
-	for x in 0 ..< scalar_field.size.x - 1 {
-		for y in 0 ..< scalar_field.size.y - 1 {
-			index := y * scalar_field.size.x + x
-			square := [4]u8 {
-				scalar_field.values[index + scalar_field.size.x],
-				scalar_field.values[index + scalar_field.size.x + 1],
-				scalar_field.values[index + 1],
-				scalar_field.values[index],
-			}
-			offset := [2]f32{f32(x), f32(y)} * scalar_field.scale
-			l := generate_lines(square[:], offset, scalar_field.scale)
-			append(&lines, ..l)
+generate_sf :: proc(size: [2]int, scale, amplitude, frequency: f32) -> ScalarField {
+	values := make([]u8, size.x * size.y)
+	for x in 0 ..< size.x {
+		for y in 0 ..< size.y {
+			scaled_x := f64(f32(x) * frequency)
+			scaled_y := f64(f32(y) * frequency)
+			n := noise.noise_2d(69, {scaled_x, scaled_y})
+			normalized := (n + 1) / 2 // from -1.0 - 1.0 to 0.0 - 1.0
+			adjusted := normalized * frequency
+			expanded := u8(i32(adjusted * amplitude) % 16) // from 0.0 - 1.0 to 0 - 15, modded just in case
+			values[y * size.x + x] = expanded
 		}
 	}
+	return {values, size, scale}
+}
 
-	fmt.println(lines)
+main :: proc() {
+	rl.InitWindow(640, 360, "Marching Squares")
+	rl.SetTargetFPS(60)
+
+	// scalar_field := ScalarField {
+	// 	values = []u8{0, 0, 0, 0, 0, 15, 15, 0, 0, 15, 15, 0, 0, 15, 15, 0},
+	// 	size   = [2]int{4, 4},
+	// 	scale  = 20,
+	// }
+
+	size := [2]int{33, 19}
+	scale: f32 = 20
+	amplitude: f32 = 5
+	frequency: f32 = 50
+	scalar_field := generate_sf(size, scale, amplitude, frequency)
+	lines := generate_sf_lines(scalar_field)
+
+	// fmt.println(scalar_field)
 
 	for !rl.WindowShouldClose() {
+		if rl.IsKeyPressed(rl.KeyboardKey.N) {
+			amplitude += 2
+			scalar_field = generate_sf(size, scale, amplitude, frequency)
+			lines = generate_sf_lines(scalar_field)
+		}
+		if rl.IsKeyPressed(rl.KeyboardKey.E) {
+			frequency += 5
+			scalar_field = generate_sf(size, scale, amplitude, frequency)
+			lines = generate_sf_lines(scalar_field)
+		}
 		rl.BeginDrawing()
 		{
 			rl.ClearBackground(rl.BLACK)
 
 			for x in 0 ..< scalar_field.size.x {
 				for y in 0 ..< scalar_field.size.y {
-					rl.DrawRectangleV({f32(x), f32(y)} * 20 + 20, {2, 2}, {255, 255, 255, 128})
+					rl.DrawRectangleV({f32(x), f32(y)} * 20, {2, 2}, {255, 255, 255, 128})
 					i := index_from_pos({f32(x), f32(y)}, scalar_field.size.x)
-					// rl.DrawText(fmt.caprintf("%d", i), i32(x * 20), i32(y * 20), 10, rl.WHITE)
+					// rl.DrawText(
+					// 	fmt.caprintf("%d", scalar_field.values[i]),
+					// 	i32(x * 20) + 5,
+					// 	i32(y * 20) + 5,
+					// 	10,
+					// 	rl.WHITE,
+					// )
 				}
 			}
 
+			for x in 0 ..< scalar_field.size.x - 1 {
+				for y in 0 ..< scalar_field.size.y - 1 {
+
+					index := y * scalar_field.size.x + x
+					square := [4]u8 {
+						scalar_field.values[index + scalar_field.size.x],
+						scalar_field.values[index + scalar_field.size.x + 1],
+						scalar_field.values[index + 1],
+						scalar_field.values[index],
+					}
+					configuration := determine_configuration(square[:])
+					// rl.DrawText(
+					// 	fmt.caprintf("%d", configuration),
+					// 	i32(x * 20) + 5,
+					// 	i32(y * 20) + 5,
+					// 	10,
+					// 	rl.WHITE,
+					// )
+				}
+
+			}
+
 			for line in lines {
-				rl.DrawLineV(line.x + 20, line.y + 20, rl.WHITE)
+				rl.DrawLineV(line.x, line.y, rl.WHITE)
 			}
 		}
 		rl.EndDrawing()
 	}
+}
+
+generate_sf_lines :: proc(sf: ScalarField) -> [][2][2]f32 {
+	lines := make([dynamic][2][2]f32)
+	for x in 0 ..< sf.size.x - 1 {
+		for y in 0 ..< sf.size.y - 1 {
+			index := y * sf.size.x + x
+			square := [4]u8 {
+				sf.values[index + sf.size.x],
+				sf.values[index + sf.size.x + 1],
+				sf.values[index + 1],
+				sf.values[index],
+			}
+			offset := [2]f32{f32(x), f32(y)} * sf.scale
+			l := generate_lines(square[:], offset, sf.scale)
+			append(&lines, ..l)
+		}
+	}
+	return lines[:]
 }
 
 edge_table := [16]u8 {
@@ -187,7 +252,7 @@ edge_table := [16]u8 {
 	0b0110,
 	0b1111,
 	0b0101,
-	0b1001,
+	0b1100,
 	0b1100,
 	0b0101,
 	0b1111,
@@ -204,15 +269,15 @@ line_table := [16][]i8 {
 	{0, 1},
 	{1, 3},
 	{1, 2},
-	{1, 2, 3, 0},
+	{0, 3, 1, 2},
 	{0, 2},
-	{0, 3},
 	{2, 3},
-	{0, 2},
+	{2, 3},
+	{2, 0},
 	{0, 1, 2, 3},
 	{1, 2},
-	{1, 3},
+	{3, 1},
 	{0, 1},
-	{0, 3},
+	{3, 0},
 	{},
 }
