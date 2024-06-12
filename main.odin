@@ -8,9 +8,9 @@
 	- at least one value must be below the threshold
 	- at least one value must be above the threshold
 
-	D -- C values must be ordered bottom left -> bottom right -> top right -> top left
+	A -- D values must be ordered top left -> bottom left -> bottom right -> top right
 	|    | this is consistent with graphics APIs that require counter-clockwise winding
-	A -- B (will be useful when transitioning to marching cubes)
+	B -- C (will be useful when transitioning to marching cubes)
 
 	Example:
 	0---0 only the bottom right corner is above the threshold
@@ -44,24 +44,24 @@ determine_configuration :: proc(square: []u8) -> u8 {
 }
 
 vertex_interpolate :: proc(square: []u8, edge: u8) -> [2]f32 {
-	//   0  
-	// 3   1 edge order
-	//   2 
+	//   3  
+	// 0   2 edge order
+	//   1 
 	// TODO: Branchless version
 	a, b: [2]f32
 	switch edge {
 	case 0:
-		a.x = 1
-		a.y = 1
 		b.y = 1
 	case 1:
-		a.x = 1
+		a.y = 1
 		b.x = 1
 		b.y = 1
 	case 2:
+		a.x = 1
 		b.x = 1
+		b.y = 1
 	case 3:
-		a.y = 1
+		b.x = 1
 	}
 
 	// Just the midpoint for now!
@@ -78,10 +78,9 @@ generate_lines :: proc(square: []u8, offset: [2]f32 = {0, 0}, scale: f32) -> [][
 	if square_index != 0 {
 		vertices := make([][2]f32, 4)
 
-		//   0  
-		// 3   1 edge order
-		//   2 
-		// NOTE: Why this order? Because Raylib draws top to bottom
+		//   3  
+		// 0   2 edge order
+		//   1 
 		for edge in 0 ..= 3 {
 			if square_index & (1 << u8(edge)) > 0 {
 				vertices[edge] = vertex_interpolate(square, u8(edge)) * scale + offset
@@ -148,77 +147,33 @@ generate_sf :: proc(size: [2]int, scale, amplitude, frequency: f32) -> ScalarFie
 }
 
 main :: proc() {
-	rl.InitWindow(640, 360, "Marching Squares")
+	rl.InitWindow(1920, 1080, "Marching Squares")
 	rl.SetTargetFPS(60)
 
-	// scalar_field := ScalarField {
-	// 	values = []u8{0, 0, 0, 0, 0, 15, 15, 0, 0, 15, 15, 0, 0, 15, 15, 0},
-	// 	size   = [2]int{4, 4},
-	// 	scale  = 20,
-	// }
+	instances: [16]SquareInstance
 
-	size := [2]int{33, 19}
-	scale: f32 = 20
-	amplitude: f32 = 5
-	frequency: f32 = 50
-	scalar_field := generate_sf(size, scale, amplitude, frequency)
-	lines := generate_sf_lines(scalar_field)
-
-	// fmt.println(scalar_field)
+	for i in 0 ..= 15 {
+		square := square_from_mask(u8(i))
+		lines := generate_lines(square[:], {}, 100)
+		instances[i] = {square, lines}
+	}
 
 	for !rl.WindowShouldClose() {
-		if rl.IsKeyPressed(rl.KeyboardKey.N) {
-			amplitude += 2
-			scalar_field = generate_sf(size, scale, amplitude, frequency)
-			lines = generate_sf_lines(scalar_field)
-		}
-		if rl.IsKeyPressed(rl.KeyboardKey.E) {
-			frequency += 5
-			scalar_field = generate_sf(size, scale, amplitude, frequency)
-			lines = generate_sf_lines(scalar_field)
-		}
 		rl.BeginDrawing()
 		{
 			rl.ClearBackground(rl.BLACK)
-
-			for x in 0 ..< scalar_field.size.x {
-				for y in 0 ..< scalar_field.size.y {
-					rl.DrawRectangleV({f32(x), f32(y)} * 20, {2, 2}, {255, 255, 255, 128})
-					i := index_from_pos({f32(x), f32(y)}, scalar_field.size.x)
-					// rl.DrawText(
-					// 	fmt.caprintf("%d", scalar_field.values[i]),
-					// 	i32(x * 20) + 5,
-					// 	i32(y * 20) + 5,
-					// 	10,
-					// 	rl.WHITE,
-					// )
+			x: f32 = 20
+			y: f32 = 20
+			for instance, index in instances {
+				rl.DrawRectangleLines(i32(x), i32(y), 100, 100, rl.WHITE)
+				for line in instance.lines {
+					rl.DrawLineV(line.x + {x, y}, line.y + {x, y}, rl.WHITE)
 				}
-			}
-
-			for x in 0 ..< scalar_field.size.x - 1 {
-				for y in 0 ..< scalar_field.size.y - 1 {
-
-					index := y * scalar_field.size.x + x
-					square := [4]u8 {
-						scalar_field.values[index + scalar_field.size.x],
-						scalar_field.values[index + scalar_field.size.x + 1],
-						scalar_field.values[index + 1],
-						scalar_field.values[index],
-					}
-					configuration := determine_configuration(square[:])
-					// rl.DrawText(
-					// 	fmt.caprintf("%d", configuration),
-					// 	i32(x * 20) + 5,
-					// 	i32(y * 20) + 5,
-					// 	10,
-					// 	rl.WHITE,
-					// )
+				x += 120
+				if (index + 1) % 4 == 0 {
+					x = 20
+					y += 120
 				}
-
-			}
-
-			for line in lines {
-				rl.DrawLineV(line.x, line.y, rl.WHITE)
 			}
 		}
 		rl.EndDrawing()
