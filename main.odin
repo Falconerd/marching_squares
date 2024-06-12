@@ -43,22 +43,22 @@ determine_configuration :: proc(square: []u8) -> u8 {
 }
 
 vertex_interpolate :: proc(square: []u8, edge: u8) -> [2]f32 {
-	//   2  
+	//   0  
 	// 3   1 edge order
-	//   0 
+	//   2 
 	// TODO: Branchless version
 	a, b: [2]f32
 	switch edge {
 	case 0:
-		b.x = 1
+		a.x = 1
+		a.y = 1
+		b.y = 1
 	case 1:
 		a.x = 1
 		b.x = 1
 		b.y = 1
 	case 2:
-		a.x = 1
-		a.y = 1
-		b.y = 1
+		b.x = 1
 	case 3:
 		a.y = 1
 	}
@@ -69,7 +69,7 @@ vertex_interpolate :: proc(square: []u8, edge: u8) -> [2]f32 {
 
 // takes a square made from 4 values in the scalar field
 // the result is a slice of lines which may be empty
-generate_lines :: proc(square: []u8) -> [][2][2]f32 {
+generate_lines :: proc(square: []u8, offset: [2]f32 = {0, 0}, scale: f32) -> [][2][2]f32 {
 	lines := make([dynamic][2][2]f32)
 	configuration := determine_configuration(square)
 	square_index := edge_table[configuration]
@@ -77,12 +77,13 @@ generate_lines :: proc(square: []u8) -> [][2][2]f32 {
 	if square_index != 0 {
 		vertices := make([][2]f32, 4)
 
-		//   2  
+		//   0  
 		// 3   1 edge order
-		//   0 
+		//   2 
+		// NOTE: Why this order? Because Raylib draws top to bottom
 		for edge in 0 ..= 3 {
 			if square_index & (1 << u8(edge)) > 0 {
-				vertices[edge] = vertex_interpolate(square, u8(edge))
+				vertices[edge] = vertex_interpolate(square, u8(edge)) * scale + offset
 			}
 		}
 
@@ -113,33 +114,65 @@ SquareInstance :: struct {
 	lines:  [][2][2]f32,
 }
 
+ScalarField :: struct {
+	values: []u8,
+	size:   [2]int,
+	scale:  f32,
+}
+
+index_from_pos :: proc(p: [2]f32, width: int) -> int {
+	return int(p.y * f32(width) + p.x)
+}
+
+pos_from_index :: proc(index, width: int) -> [2]f32 {
+	x := f32(index % width)
+	y := f32(index / width)
+	return [2]f32{x, y}
+}
+
 main :: proc() {
 	rl.InitWindow(1080, 720, "Marching Squares")
 	rl.SetTargetFPS(60)
-	instances := make([dynamic]SquareInstance)
+	lines := make([dynamic][2][2]f32)
 
-	for i in 0 ..= 15 {
-		square := square_from_mask(u8(i))
-		lines := generate_lines(square[:])
-		append(&instances, SquareInstance{square = square, lines = lines})
+	scalar_field := ScalarField {
+		values = []u8{0, 0, 0, 0, 0, 15, 15, 0, 0, 15, 15, 0, 0, 0, 0, 0},
+		size   = [2]int{4, 4},
+		scale  = 20,
 	}
+
+	for x in 0 ..< scalar_field.size.x - 1 {
+		for y in 0 ..< scalar_field.size.y - 1 {
+			index := y * scalar_field.size.x + x
+			square := [4]u8 {
+				scalar_field.values[index + scalar_field.size.x],
+				scalar_field.values[index + scalar_field.size.x + 1],
+				scalar_field.values[index + 1],
+				scalar_field.values[index],
+			}
+			offset := [2]f32{f32(x), f32(y)} * scalar_field.scale
+			l := generate_lines(square[:], offset, scalar_field.scale)
+			append(&lines, ..l)
+		}
+	}
+
+	fmt.println(lines)
 
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
 		{
 			rl.ClearBackground(rl.BLACK)
-			x: f32 = 20
-			y: f32 = 20
-			for instance, index in instances {
-				rl.DrawRectangleLines(i32(x), i32(y), 100, 100, rl.WHITE)
-				for line in instance.lines {
-					rl.DrawLineV(line.x * 100 + {x, y}, line.y * 100 + {x, y}, rl.WHITE)
+
+			for x in 0 ..< scalar_field.size.x {
+				for y in 0 ..< scalar_field.size.y {
+					rl.DrawRectangleV({f32(x), f32(y)} * 20 + 20, {2, 2}, {255, 255, 255, 128})
+					i := index_from_pos({f32(x), f32(y)}, scalar_field.size.x)
+					// rl.DrawText(fmt.caprintf("%d", i), i32(x * 20), i32(y * 20), 10, rl.WHITE)
 				}
-				x += 120
-				if (index + 1) % 4 == 0 {
-					x = 20
-					y += 120
-				}
+			}
+
+			for line in lines {
+				rl.DrawLineV(line.x + 20, line.y + 20, rl.WHITE)
 			}
 		}
 		rl.EndDrawing()
